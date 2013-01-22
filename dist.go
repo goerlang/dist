@@ -185,8 +185,6 @@ func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []erl.Term, err error) {
 
 		switch msg[0] {
 		case 'p':
-			//msg, err = ioutil.ReadAll(r)
-			//dLog("BUG HERE: %v", msg)
 			ts = make([]erl.Term, 0)
 			for {
 				var res erl.Term
