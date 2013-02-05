@@ -6,9 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
-	"github.com/goerlang/etf/read"
-	erl "github.com/goerlang/etf/types"
-	"github.com/goerlang/etf/write"
+	"github.com/goerlang/etf"
 	"io"
 	"io/ioutil"
 	"log"
@@ -88,6 +86,7 @@ type NodeDesc struct {
 	challenge uint32
 	flag      nodeFlag
 	version   uint16
+	term      *etf.Context
 }
 
 func NewNodeDesc(name, cookie string, isHidden bool) (nd *NodeDesc) {
@@ -99,11 +98,12 @@ func NewNodeDesc(name, cookie string, isHidden bool) (nd *NodeDesc) {
 		state:   HANDSHAKE,
 		flag:    toNodeFlag(PUBLISHED, UNICODE_IO, EXTENDED_PIDS_PORTS, EXTENDED_REFERENCES),
 		version: 5,
+		term:    new(etf.Context),
 	}
 	return nd
 }
 
-func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []erl.Term, err error) {
+func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []etf.Term, err error) {
 
 	sendData := func(headerLen int, data []byte) (int, error) {
 		reply := make([]byte, len(data)+headerLen)
@@ -159,7 +159,7 @@ func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []erl.Term, err error) {
 					return
 				}
 				dLog("Remote: %#v", sn)
-				ts = []erl.Term{erl.Term(erl.Tuple{erl.Atom("$go_set_node"), erl.Atom(sn.Name)})}
+				ts = []etf.Term{etf.Term(etf.Tuple{etf.Atom("$go_set_node"), etf.Atom(sn.Name)})}
 			} else {
 				err = errors.New("bad handshake")
 				return
@@ -185,9 +185,9 @@ func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []erl.Term, err error) {
 
 		switch msg[0] {
 		case 'p':
-			ts = make([]erl.Term, 0)
+			ts = make([]etf.Term, 0)
 			for {
-				var res erl.Term
+				var res etf.Term
 				if res, err = currNd.read_TERM(r); err != nil {
 					break
 				}
@@ -206,7 +206,7 @@ func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []erl.Term, err error) {
 	return
 }
 
-func (currNd *NodeDesc) WriteMessage(c net.Conn, ts []erl.Term) (err error) {
+func (currNd *NodeDesc) WriteMessage(c net.Conn, ts []etf.Term) (err error) {
 	sendData := func(data []byte) (int, error) {
 		reply := make([]byte, len(data)+4)
 		binary.BigEndian.PutUint32(reply[0:4], uint32(len(data)))
@@ -218,12 +218,12 @@ func (currNd *NodeDesc) WriteMessage(c net.Conn, ts []erl.Term) (err error) {
 	buf := new(bytes.Buffer)
 	buf.Write([]byte{'p'})
 	for _, v := range ts {
-		buf.Write([]byte{erl.EtVersion})
-		write.Term(buf, v)
+		buf.Write([]byte{etf.EtVersion})
+		currNd.term.Write(buf, v)
 	}
 	dLog("WRITE: %#v: %#v", ts, buf.Bytes())
 	sendData(buf.Bytes())
-	return nil
+	return
 }
 
 func (nd *NodeDesc) compose_SEND_NAME() (msg []byte) {
@@ -325,11 +325,11 @@ func (nd NodeDesc) Flags() (flags []string) {
 	return
 }
 
-func (currNd *NodeDesc) read_TERM(r io.Reader) (t erl.Term, err error) {
+func (currNd *NodeDesc) read_TERM(r io.Reader) (t etf.Term, err error) {
 	b := make([]byte, 1)
 	_, err = io.ReadFull(r, b)
 	if err == nil {
-		t, err = read.Term(r)
+		t, err = currNd.term.Read(r)
 	}
 	return
 }
