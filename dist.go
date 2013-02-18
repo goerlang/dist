@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
+	"fmt"
 	"github.com/goerlang/etf"
 	"io"
 	"io/ioutil"
@@ -25,7 +26,7 @@ func init() {
 
 func dLog(f string, a ...interface{}) {
 	if dTrace {
-		log.Printf(f, a...)
+		log.Printf("d# "+f, a...)
 	}
 }
 
@@ -96,7 +97,7 @@ func NewNodeDesc(name, cookie string, isHidden bool) (nd *NodeDesc) {
 		Hidden:  isHidden,
 		remote:  nil,
 		state:   HANDSHAKE,
-		flag:    toNodeFlag(PUBLISHED, UNICODE_IO, EXTENDED_PIDS_PORTS, EXTENDED_REFERENCES),
+		flag:    toNodeFlag(PUBLISHED, UNICODE_IO, EXTENDED_PIDS_PORTS, EXTENDED_REFERENCES, ATOM_CACHE, DIST_HDR_ATOM_CACHE, HIDDEN_ATOM_CACHE, SMALL_ATOM_TAGS),
 		version: 5,
 		term:    new(etf.Context),
 	}
@@ -177,30 +178,50 @@ func (currNd *NodeDesc) ReadMessage(c net.Conn) (ts []etf.Term, err error) {
 			return
 		}
 		r := &io.LimitedReader{c, int64(length)}
-		msg := make([]byte, 1)
-		if _, err = io.ReadFull(r, msg); err != nil {
-			return
-		}
-		dLog("Read from enode %d: %s", length, string(msg))
 
-		switch msg[0] {
-		case 'p':
-			ts = make([]etf.Term, 0)
-			for {
-				var res etf.Term
-				if res, err = currNd.read_TERM(r); err != nil {
-					break
+		if currNd.flag.isSet(DIST_HDR_ATOM_CACHE) {
+			var ctl, message etf.Term
+			if err = currNd.readDist(r); err != nil {
+				break
+			}
+			if ctl, err = currNd.readCtl(r); err != nil {
+				break
+			}
+			dLog("READ CTL: %#v", ctl)
+
+			if message, err = currNd.readMessage(r); err != nil {
+				break
+			}
+			dLog("READ MESSAGE: %#v", message)
+			ts = append(ts, ctl, message)
+
+		} else {
+			msg := make([]byte, 1)
+			if _, err = io.ReadFull(r, msg); err != nil {
+				return
+			}
+			dLog("Read from enode %d: %#v", length, msg)
+
+			switch msg[0] {
+			case 'p':
+				ts = make([]etf.Term, 0)
+				for {
+					var res etf.Term
+					if res, err = currNd.readTerm(r); err != nil {
+						break
+					}
+					ts = append(ts, res)
+					dLog("READ TERM: %#v", res)
 				}
-				ts = append(ts, res)
-				dLog("READ TERM: %#v", res)
-			}
-			if err == io.EOF {
-				err = nil
-			}
+				if err == io.EOF {
+					err = nil
+				}
 
-		default:
-			_, err = ioutil.ReadAll(r)
+			default:
+				_, err = ioutil.ReadAll(r)
+			}
 		}
+
 	}
 
 	return
@@ -216,10 +237,18 @@ func (currNd *NodeDesc) WriteMessage(c net.Conn, ts []etf.Term) (err error) {
 	}
 
 	buf := new(bytes.Buffer)
-	buf.Write([]byte{'p'})
-	for _, v := range ts {
+	if currNd.flag.isSet(DIST_HDR_ATOM_CACHE) {
 		buf.Write([]byte{etf.EtVersion})
-		currNd.term.Write(buf, v)
+		currNd.term.WriteDist(buf, ts)
+		for _, v := range ts {
+			currNd.term.Write(buf, v)
+		}
+	} else {
+		buf.Write([]byte{'p'})
+		for _, v := range ts {
+			buf.Write([]byte{etf.EtVersion})
+			currNd.term.Write(buf, v)
+		}
 	}
 	dLog("WRITE: %#v: %#v", ts, buf.Bytes())
 	sendData(buf.Bytes())
@@ -325,11 +354,39 @@ func (nd NodeDesc) Flags() (flags []string) {
 	return
 }
 
-func (currNd *NodeDesc) read_TERM(r io.Reader) (t etf.Term, err error) {
+func (currNd *NodeDesc) readTerm(r io.Reader) (t etf.Term, err error) {
 	b := make([]byte, 1)
 	_, err = io.ReadFull(r, b)
-	if err == nil {
-		t, err = currNd.term.Read(r)
+	if err != nil {
+		return
 	}
+	if b[0] != etf.EtVersion {
+		err = fmt.Errorf("Not ETF: %d", b[0])
+		return
+	}
+	t, err = currNd.term.Read(r)
+	return
+}
+
+func (currNd *NodeDesc) readDist(r io.Reader) (err error) {
+	b := make([]byte, 1)
+	_, err = io.ReadFull(r, b)
+	if err != nil {
+		return
+	}
+	if b[0] != etf.EtVersion {
+		err = fmt.Errorf("Not dist header: %d", b[0])
+		return
+	}
+	return currNd.term.ReadDist(r)
+}
+
+func (currNd *NodeDesc) readCtl(r io.Reader) (t etf.Term, err error) {
+	t, err = currNd.term.Read(r)
+	return
+}
+
+func (currNd *NodeDesc) readMessage(r io.Reader) (t etf.Term, err error) {
+	t, err = currNd.term.Read(r)
 	return
 }
