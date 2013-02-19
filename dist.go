@@ -97,7 +97,7 @@ func NewNodeDesc(name, cookie string, isHidden bool) (nd *NodeDesc) {
 		Hidden:  isHidden,
 		remote:  nil,
 		state:   HANDSHAKE,
-		flag:    toNodeFlag(PUBLISHED, UNICODE_IO, EXTENDED_PIDS_PORTS, EXTENDED_REFERENCES, ATOM_CACHE, DIST_HDR_ATOM_CACHE, HIDDEN_ATOM_CACHE, SMALL_ATOM_TAGS),
+		flag:    toNodeFlag(PUBLISHED, UNICODE_IO, EXTENDED_PIDS_PORTS, EXTENDED_REFERENCES, DIST_HDR_ATOM_CACHE, HIDDEN_ATOM_CACHE, SMALL_ATOM_TAGS),
 		version: 5,
 		term:    new(etf.Context),
 	}
